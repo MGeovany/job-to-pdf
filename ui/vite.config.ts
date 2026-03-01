@@ -1,14 +1,16 @@
 import path from "path"
 import { defineConfig } from 'vite'
-import solid from 'vite-plugin-solid'
+import react from '@vitejs/plugin-react'
+import type { ViteDevServer } from "vite"
+import type { IncomingMessage, ServerResponse } from "node:http"
 
 export default defineConfig({
   plugins: [
-    solid(),
+    react(),
     {
       name: "local-openai-proxy",
-      configureServer(server) {
-        server.middlewares.use("/api/ai/refactor", async (req, res) => {
+      configureServer(server: ViteDevServer) {
+        server.middlewares.use("/api/ai/refactor", async (req: IncomingMessage, res: ServerResponse) => {
           if (req.method !== "POST") {
             res.statusCode = 405
             res.setHeader("Content-Type", "application/json")
@@ -19,7 +21,7 @@ export default defineConfig({
           try {
             const chunks: Buffer[] = []
             await new Promise<void>((resolve, reject) => {
-              req.on("data", (c) => chunks.push(Buffer.from(c)))
+              req.on("data", (c: any) => chunks.push(Buffer.from(c)))
               req.on("end", () => resolve())
               req.on("error", reject)
             })
