@@ -1,0 +1,117 @@
+import { PDFDocument, StandardFonts } from "pdf-lib"
+import type { AiRefactor } from "@/lib/ai"
+
+function wrapText(text: string, maxWidth: number, measure: (s: string) => number) {
+  const normalized = text.replace(/\r\n/g, "\n")
+  const paragraphs = normalized.split("\n")
+  const lines: string[] = []
+
+  for (const p of paragraphs) {
+    const raw = p.trimEnd()
+    if (!raw) {
+      lines.push("")
+      continue
+    }
+
+    const words = raw.split(/\s+/g)
+    let current = ""
+
+    for (const w of words) {
+      const candidate = current ? `${current} ${w}` : w
+      if (measure(candidate) <= maxWidth) {
+        current = candidate
+        continue
+      }
+
+      if (current) lines.push(current)
+      current = w
+    }
+
+    if (current) lines.push(current)
+  }
+
+  return lines
+}
+
+export async function buildPdfPassthrough(resumePdf: File) {
+  const bytes = await resumePdf.arrayBuffer()
+  return new Blob([bytes], { type: "application/pdf" })
+}
+
+export async function buildPdfWithAiBrief(resumePdf: File, ai: AiRefactor) {
+  const resumeBytes = await resumePdf.arrayBuffer()
+  const resumeDoc = await PDFDocument.load(resumeBytes)
+  const outDoc = await PDFDocument.create()
+
+  const font = await outDoc.embedFont(StandardFonts.Helvetica)
+  const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const a4 = { width: 595.28, height: 841.89 }
+  const margin = 56
+  const h1 = 18
+  const h2 = 12
+  const body = 11
+  const lh = 15
+  const maxWidth = a4.width - margin * 2
+  const measure = (s: string, size: number) => font.widthOfTextAtSize(s, size)
+  const wrap = (t: string, size: number) => wrapText(t, maxWidth, (s) => measure(s, size))
+
+  let page = outDoc.addPage([a4.width, a4.height])
+  let y = a4.height - margin
+
+  const ensureSpace = () => {
+    if (y >= margin + lh) return
+    page = outDoc.addPage([a4.width, a4.height])
+    y = a4.height - margin
+  }
+
+  const drawLine = (text: string, size = body, bold = false) => {
+    ensureSpace()
+    page.drawText(text, { x: margin, y, size, font: bold ? fontBold : font })
+    y -= lh
+  }
+
+  page.drawText("Job Brief", { x: margin, y: y - h1, size: h1, font: fontBold })
+  y -= h1 + 18
+
+  if (ai.title.trim()) {
+    drawLine(ai.title.trim(), h2, true)
+    y -= 6
+  }
+
+  for (const line of wrap(ai.summary.trim(), body)) drawLine(line || " ")
+
+  y -= 10
+  if (ai.mustHaves.length) {
+    drawLine("Must-haves", h2, true)
+    for (const b of ai.mustHaves.slice(0, 10)) {
+      for (const line of wrap(`- ${b}`.trim(), body)) drawLine(line || " ")
+    }
+    y -= 10
+  }
+
+  if (ai.niceToHaves.length) {
+    drawLine("Nice-to-haves", h2, true)
+    for (const b of ai.niceToHaves.slice(0, 8)) {
+      for (const line of wrap(`- ${b}`.trim(), body)) drawLine(line || " ")
+    }
+    y -= 10
+  }
+
+  if (ai.keywords.length) {
+    drawLine("Keywords", h2, true)
+    const kw = ai.keywords
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .slice(0, 20)
+      .join("  ")
+    for (const line of wrap(kw, body)) drawLine(line || " ")
+  }
+
+  const copied = await outDoc.copyPages(resumeDoc, resumeDoc.getPageIndices())
+  for (const p of copied) outDoc.addPage(p)
+
+  const bytes = await outDoc.save()
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return new Blob([ab], { type: "application/pdf" })
+}
