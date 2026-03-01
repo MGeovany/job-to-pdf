@@ -1,0 +1,39 @@
+name: "Alex Dev"
+title: "Senior Full Stack Engineer"
+location: "Remote / Tech City"
+links:
+  - label: "GitHub"
+    url: "https://github.com/alexdev"
+  - label: "LinkedIn"
+    url: "https://linkedin.com/in/alexdev"
+  - label: "Portfolio"
+    url: "https://alexdev.io"
+
+summary: "Software engineer with 8+ years of experience building scalable applications. Focused on TypeScript, Node.js, and React. Passionate about automated workflows, performance optimization, and robust system architecture."
+
+skills:
+  - category: "Languages"
+    items: ["TypeScript", "JavaScript", "Python", "Go"]
+  - category: "Frontend"
+    items: ["React", "Next.js", "Tailwind CSS", "Redux"]
+  - category: "Backend"
+    items: ["Node.js", "Express", "NestJS", "PostgreSQL", "MongoDB"]
+  - category: "Tools"
+    items: ["Docker", "Kubernetes", "AWS", "Playwright", "Git"]
+
+projects:
+  - title: "E-Commerce Pipeline Automation"
+    tech: ["Node.js", "TypeScript", "AWS SQS", "Docker"]
+    description: "Built an automated ETL pipeline for processing 10k+ daily transactions. Reduced processing time by 40% and improved error handling using robust TypeScript models."
+    
+  - title: "Internal PDF Generator Service"
+    tech: ["Node.js", "Playwright", "Express"]
+    description: "Created a microservice to generate high-quality PDF reports from dynamic HTML templates. Handled concurrent requests using cluster mode."
+    
+  - title: "Real-time Collaboration Dashboard"
+    tech: ["React", "WebSockets", "Redux"]
+    description: "Developed a real-time dashboard for remote teams to collaborate on tasks. Implemented optimistic UI updates and robust state management."
+    
+  - title: "Legacy Migration Tool"
+    tech: ["Python", "PostgreSQL", "Data pipelines"]
+    description: "Migrated terabytes of legacy data to modern schema. Maintained 99.9% uptime during the migration phase."

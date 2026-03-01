@@ -1,0 +1,11 @@
+Senior Node.js Backend Engineer
+
+We are looking for a backend engineer to join our automation team. You will be responsible for building robust services using Node.js and TypeScript.
+
+Requirements:
+- Strong experience with Node.js and building scalable services
+- Proficiency in TypeScript and API design
+- Experience with PDF generation or reporting tools (e.g. Playwright, Puppeteer) is a big plus
+- Knowledge of Docker and basic AWS services
+- Familiarity with CI/CD and deployment pipelines
+- Strong problem-solving skills and clean architecture practices.

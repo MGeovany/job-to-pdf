@@ -1,0 +1,121 @@
+:root {
+    --primary: #2c3e50;
+    --text: #333;
+    --light-text: #666;
+    --bg: #fff;
+    --accent: #3498db;
+    --border: #eaeaea;
+}
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+    font-size: 11pt;
+}
+
+header {
+    text-align: center;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+
+header h1 {
+    font-size: 24pt;
+    margin: 0;
+    color: var(--primary);
+    letter-spacing: -0.5px;
+}
+
+header h2 {
+    font-size: 14pt;
+    margin: 5px 0;
+    font-weight: 500;
+    color: var(--light-text);
+}
+
+.meta {
+    font-size: 10pt;
+    color: var(--light-text);
+}
+
+.meta a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.section-title {
+    font-size: 13pt;
+    color: var(--primary);
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 3px;
+    margin-top: 15px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.summary p {
+    font-size: 10.5pt;
+    color: var(--text);
+    text-align: justify;
+    margin-top: 0;
+}
+
+.badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.badge {
+    background: #f1f5f9;
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 9pt;
+    border: 1px solid #e2e8f0;
+    font-weight: 500;
+}
+
+.skill-category {
+    margin-bottom: 8px;
+    font-size: 10.5pt;
+}
+
+.project {
+    margin-bottom: 15px;
+}
+
+.project h3 {
+    margin: 0 0 4px 0;
+    font-size: 11.5pt;
+    color: var(--primary);
+}
+
+.tech-stack {
+    font-size: 9pt;
+    color: var(--accent);
+    margin: 0 0 6px 0;
+    font-weight: 500;
+}
+
+.project p {
+    margin: 0;
+    font-size: 10.5pt;
+    color: var(--light-text);
+    text-align: justify;
+}
+
+footer {
+    margin-top: 30px;
+    text-align: center;
+    font-size: 8pt;
+    color: var(--light-text);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+}
