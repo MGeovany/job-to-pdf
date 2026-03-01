@@ -4,7 +4,7 @@ import type { JobPost } from "@/types"
 import { AiTokenCard } from "@/components/AiTokenCard"
 import { ResumeUploadCard } from "@/components/ResumeUploadCard"
 import { JobManagerCard } from "@/components/JobManagerCard"
-import { refactorJobWithAi } from "@/lib/ai"
+import { refactorJobWithAi, type AiProvider } from "@/lib/ai"
 import { buildPdfPassthrough, buildPdfWithAiBrief } from "@/lib/pdf-builders"
 import { deleteStoredResume, readStoredResume, writeStoredResume } from "@/lib/resume-store"
 
@@ -20,6 +20,9 @@ function createJobPost(id: string, index: number): JobPost {
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
+  const [aiProvider, setAiProvider] = useState<AiProvider>(
+    () => (localStorage.getItem("aiProvider") as AiProvider) || "openai"
+  )
   const [aiToken, setAiToken] = useState(() => localStorage.getItem("aiToken") ?? "")
 
   const [posts, setPosts] = useState<JobPost[]>([{ id: "1", title: "Job 1", content: "", status: "idle", aiMode: "off" }])
@@ -41,6 +44,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("aiToken", aiToken)
   }, [aiToken])
+
+  useEffect(() => {
+    localStorage.setItem("aiProvider", aiProvider)
+  }, [aiProvider])
 
   useEffect(() => {
     ;(async () => {
@@ -75,7 +82,7 @@ export default function App() {
       try {
         let blob: Blob
         if (nextPost.aiMode === "on" && aiToken.trim()) {
-          const brief = await refactorJobWithAi(aiToken, nextPost.content)
+          const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content)
           blob = await buildPdfWithAiBrief(file, brief)
         } else {
           blob = await buildPdfPassthrough(file)
@@ -98,7 +105,7 @@ export default function App() {
         setRunningId(null)
       }
     })()
-  }, [queue, runningId, file, posts, aiToken])
+  }, [queue, runningId, file, posts, aiToken, aiProvider])
 
   const onPickResume = (picked: File) => {
     setFile(picked)
@@ -175,7 +182,12 @@ export default function App() {
           <ResumeUploadCard file={file} onPick={onPickResume} onForget={onForgetResume} />
 
           <div className="space-y-4">
-            <AiTokenCard token={aiToken} onTokenChange={setAiToken} />
+            <AiTokenCard
+              provider={aiProvider}
+              onProviderChange={setAiProvider}
+              token={aiToken}
+              onTokenChange={setAiToken}
+            />
             <JobManagerCard
               posts={posts}
               activeId={activeId}

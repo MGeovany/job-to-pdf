@@ -6,11 +6,17 @@ export type AiRefactor = {
   keywords: string[]
 }
 
-export async function refactorJobWithAi(token: string, jobText: string): Promise<AiRefactor> {
+export type AiProvider = "openai" | "anthropic"
+
+export async function refactorJobWithAi(
+  provider: AiProvider,
+  token: string,
+  jobText: string
+): Promise<AiRefactor> {
   const resp = await fetch("/api/ai/refactor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, jobText }),
+    body: JSON.stringify({ provider, token, jobText }),
   })
 
   const data = (await resp.json().catch(() => null)) as any

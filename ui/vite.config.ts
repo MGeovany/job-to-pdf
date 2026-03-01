@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "local-openai-proxy",
+      name: "local-ai-proxy",
       configureServer(server: ViteDevServer) {
         server.middlewares.use("/api/ai/refactor", async (req: IncomingMessage, res: ServerResponse) => {
           if (req.method !== "POST") {
@@ -27,6 +27,7 @@ export default defineConfig({
             })
             const raw = Buffer.concat(chunks).toString("utf8")
             const body = JSON.parse(raw || "{}") as any
+            const provider = String(body.provider ?? "openai")
             const token = String(body.token ?? "").trim()
             const jobText = String(body.jobText ?? "")
 
@@ -34,6 +35,64 @@ export default defineConfig({
               res.statusCode = 400
               res.setHeader("Content-Type", "application/json")
               res.end(JSON.stringify({ error: "Missing token" }))
+              return
+            }
+
+            const prompt = [
+              "Convert this job description into a brief with:",
+              "- title: string (short)",
+              "- summary: string (2-4 sentences)",
+              "- mustHaves: 5-10 bullets",
+              "- niceToHaves: 3-8 bullets",
+              "- keywords: 10-20 single tokens/phrases",
+              "Rules:",
+              "- Output JSON only.",
+              "- No markdown.",
+              "- Keep bullets concise.",
+              "JOB:",
+              jobText,
+            ].join("\n")
+
+            if (provider === "anthropic") {
+              const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-api-key": token,
+                  "anthropic-version": "2023-06-01",
+                },
+                body: JSON.stringify({
+                  model: "claude-3-5-haiku-latest",
+                  max_tokens: 900,
+                  temperature: 0.2,
+                  system:
+                    "You rewrite job descriptions into a compact, PDF-ready brief. Return ONLY valid JSON.",
+                  messages: [{ role: "user", content: prompt }],
+                }),
+              })
+
+              const payload = (await upstream.json().catch(() => null)) as any
+              if (!upstream.ok) {
+                const msg = payload?.error?.message || payload?.message || `AI error (${upstream.status})`
+                res.statusCode = upstream.status
+                res.setHeader("Content-Type", "application/json")
+                res.end(JSON.stringify({ error: String(msg) }))
+                return
+              }
+
+              const textBlocks = Array.isArray(payload?.content) ? payload.content : []
+              const text = textBlocks
+                .filter((b: any) => b && b.type === "text" && typeof b.text === "string")
+                .map((b: any) => b.text)
+                .join("\n")
+
+              res.statusCode = 200
+              res.setHeader("Content-Type", "application/json")
+              res.end(
+                JSON.stringify({
+                  choices: [{ message: { content: text } }],
+                })
+              )
               return
             }
 
@@ -52,23 +111,7 @@ export default defineConfig({
                     content:
                       "You rewrite job descriptions into a compact, PDF-ready brief. Return ONLY valid JSON.",
                   },
-                  {
-                    role: "user",
-                    content: [
-                      "Convert this job description into a brief with:",
-                      "- title: string (short)",
-                      "- summary: string (2-4 sentences)",
-                      "- mustHaves: 5-10 bullets",
-                      "- niceToHaves: 3-8 bullets",
-                      "- keywords: 10-20 single tokens/phrases",
-                      "Rules:",
-                      "- Output JSON only.",
-                      "- No markdown.",
-                      "- Keep bullets concise.",
-                      "JOB:",
-                      jobText,
-                    ].join("\n"),
-                  },
+                  { role: "user", content: prompt },
                 ],
                 response_format: { type: "json_object" },
               }),
