@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 import type { ViteDevServer } from "vite"
 import type { IncomingMessage, ServerResponse } from "node:http"
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -39,23 +43,26 @@ export default defineConfig({
             }
 
             const prompt = [
-              "Convert this job description into a brief with:",
+              "You will generate ATS-optimized resume text based on the job description.",
+              "Return a JSON object with:",
               "- title: string (short)",
-              "- summary: string (2-4 sentences)",
-              "- mustHaves: 5-10 bullets",
-              "- niceToHaves: 3-8 bullets",
+              "- summary: string (2-4 sentences; recruiter-friendly job brief)",
+              "- mustHaves: 5-10 bullets (job requirements)",
+              "- niceToHaves: 3-8 bullets (job preferences)",
               "- keywords: 10-20 single tokens/phrases",
               "- resumeHeadline: string (single line, ATS-friendly)",
-              "- resumeSummary: string (3-5 lines, keyword-dense, recruiter tone)",
-              "- suggestedBullets: 6-10 bullets (resume-ready, quantified where possible)",
-              "- changeLogApplied: 2-6 bullets (what was changed in the generated PDF output)",
-              "- nextEditsRecommended: 4-10 bullets (what to edit in the resume next)",
+              "- resumeSummary: string (3-6 lines; keyword-dense; sounds like the candidate; no fluff)",
+              "- suggestedBullets: 6-10 bullets (resume-ready; action + impact; include relevant keywords; no invented company names)",
+              "- changeLogApplied: 2-6 bullets (what you changed in the GENERATED PDF addendum text vs a generic SWE resume)",
+              "- nextEditsRecommended: 4-10 bullets (what to update in the resume content next)",
               "Rules:",
               "- Output JSON only.",
               "- No markdown.",
               "- Keep bullets concise.",
               "- Do NOT include the full job description in any field.",
               "- Act as a senior HR recruiter optimizing for ATS and relevance.",
+              "- Reuse exact keywords/phrases from the job description (where truthful/neutral) across resumeHeadline/resumeSummary/suggestedBullets.",
+              "- Avoid vague claims; prefer specific responsibilities and outcomes phrased generally (e.g., 'improved latency', 'reduced errors').",
               "JOB:",
               jobText,
             ].join("\n")
@@ -69,11 +76,48 @@ export default defineConfig({
                   "anthropic-version": "2023-06-01",
                 },
                 body: JSON.stringify({
-                  model: "claude-3-5-haiku-latest",
+                  // Cheap + broadly available model
+                  model: "claude-3-haiku-20240307",
                   max_tokens: 900,
                   temperature: 0.2,
                   system:
-                    "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Return ONLY valid JSON.",
+                    "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Use the tool to return structured output.",
+                  tools: [
+                    {
+                      name: "tailor_job",
+                      description:
+                        "Return a structured ATS-focused brief and resume tailoring notes based on the job description.",
+                      input_schema: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {
+                          title: { type: "string" },
+                          summary: { type: "string" },
+                          mustHaves: { type: "array", items: { type: "string" } },
+                          niceToHaves: { type: "array", items: { type: "string" } },
+                          keywords: { type: "array", items: { type: "string" } },
+                          resumeHeadline: { type: "string" },
+                          resumeSummary: { type: "string" },
+                          suggestedBullets: { type: "array", items: { type: "string" } },
+                          changeLogApplied: { type: "array", items: { type: "string" } },
+                          nextEditsRecommended: { type: "array", items: { type: "string" } },
+                        },
+                        required: [
+                          "title",
+                          "summary",
+                          "mustHaves",
+                          "niceToHaves",
+                          "keywords",
+                          "resumeHeadline",
+                          "resumeSummary",
+                          "suggestedBullets",
+                          "changeLogApplied",
+                          "nextEditsRecommended",
+                        ],
+                      },
+                    },
+                  ],
+                  tool_choice: { type: "tool", name: "tailor_job" },
                   messages: [{ role: "user", content: prompt }],
                 }),
               })
@@ -87,11 +131,17 @@ export default defineConfig({
                 return
               }
 
-              const textBlocks = Array.isArray(payload?.content) ? payload.content : []
-              const text = textBlocks
-                .filter((b: any) => b && b.type === "text" && typeof b.text === "string")
-                .map((b: any) => b.text)
-                .join("\n")
+              const blocks = Array.isArray(payload?.content) ? payload.content : []
+              const toolUse = blocks.find((b: any) => b && b.type === "tool_use" && b.name === "tailor_job")
+              const input = toolUse?.input
+              if (!input || typeof input !== "object") {
+                res.statusCode = 500
+                res.setHeader("Content-Type", "application/json")
+                res.end(JSON.stringify({ error: "Anthropic tool response missing" }))
+                return
+              }
+
+              const text = JSON.stringify(input)
 
               res.statusCode = 200
               res.setHeader("Content-Type", "application/json")

@@ -71,39 +71,36 @@ export async function buildPdfWithAiBrief(resumePdf: File, ai: AiRefactor) {
     y -= lh
   }
 
-  page.drawText("Job Brief", { x: margin, y: y - h1, size: h1, font: fontBold })
+  page.drawText("Tailored Resume Addendum", { x: margin, y: y - h1, size: h1, font: fontBold })
   y -= h1 + 18
 
-  if (ai.title.trim()) {
-    drawLine(ai.title.trim(), h2, true)
+  if (ai.resumeHeadline?.trim()) {
+    drawLine(ai.resumeHeadline.trim(), h2, true)
     y -= 6
   }
 
-  for (const line of wrap(ai.summary.trim(), body)) drawLine(line || " ")
+  if (ai.resumeSummary?.trim()) {
+    for (const line of wrap(ai.resumeSummary.trim(), body)) drawLine(line || " ")
+    y -= 10
+  }
 
-  y -= 10
-  if (ai.mustHaves.length) {
-    drawLine("Must-haves", h2, true)
-    for (const b of ai.mustHaves.slice(0, 10)) {
+  if (ai.suggestedBullets?.length) {
+    drawLine("Suggested bullets", h2, true)
+    for (const b of ai.suggestedBullets
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 10)) {
       for (const line of wrap(`- ${b}`.trim(), body)) drawLine(line || " ")
     }
     y -= 10
   }
 
-  if (ai.niceToHaves.length) {
-    drawLine("Nice-to-haves", h2, true)
-    for (const b of ai.niceToHaves.slice(0, 8)) {
-      for (const line of wrap(`- ${b}`.trim(), body)) drawLine(line || " ")
-    }
-    y -= 10
-  }
-
-  if (ai.keywords.length) {
-    drawLine("Keywords", h2, true)
+  if (ai.keywords?.length) {
+    drawLine("ATS keywords", h2, true)
     const kw = ai.keywords
       .map((k) => k.trim())
       .filter(Boolean)
-      .slice(0, 20)
+      .slice(0, 24)
       .join("  ")
     for (const line of wrap(kw, body)) drawLine(line || " ")
   }
