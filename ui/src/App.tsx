@@ -242,6 +242,7 @@ export default function App() {
               fileReady={!!file}
               runningId={runningId}
               aiTokenPresent={aiTokenPresent}
+              resumeReady={!!resumeText.trim()}
             />
           </div>
         </div>

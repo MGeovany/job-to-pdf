@@ -247,6 +247,18 @@ export async function buildTailoringReportPdf(ai: AiRefactor) {
     )
   }
 
+  const before = ai.beforeAfter?.summary?.before?.trim()
+  const after = ai.beforeAfter?.summary?.after?.trim()
+  if (before || after) {
+    drawBlock(
+      "Summary before/after",
+      [
+        before ? `Before: ${before}` : "",
+        after ? `After: ${after}` : "",
+      ].filter(Boolean) as string[]
+    )
+  }
+
   drawBlock(
     "Suggested bullets (adapt to your experience)",
     ai.suggestedBullets

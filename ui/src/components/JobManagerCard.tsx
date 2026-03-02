@@ -24,6 +24,7 @@ type Props = {
   fileReady: boolean
   runningId: string | null
   aiTokenPresent: boolean
+  resumeReady: boolean
 }
 
 export function JobManagerCard(props: Props) {
@@ -116,13 +117,13 @@ export function JobManagerCard(props: Props) {
                   onChange={(e) =>
                     props.updatePost(current.id, { aiMode: e.target.checked ? "on" : "off" })
                   }
-                  disabled={!props.aiTokenPresent}
+                  disabled={!props.aiTokenPresent || !props.resumeReady}
                   className="h-4 w-4 accent-neutral-200"
                 />
-                Use AI to refactor cover page
+                Use AI to tailor CV copy
               </label>
               <div className="text-[11px] text-neutral-600">
-                {props.aiTokenPresent ? "" : "Add token to enable"}
+                {!props.aiTokenPresent ? "Add token" : !props.resumeReady ? "Upload DOCX" : ""}
               </div>
             </div>
 

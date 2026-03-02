@@ -54,6 +54,8 @@ export default defineConfig({
               "- resumeHeadline: string (single line, ATS-friendly)",
               "- resumeSummary: string (3-6 lines; keyword-dense; sounds like the candidate; no fluff)",
               "- suggestedBullets: 6-10 bullets (resume-ready; action + impact; include relevant keywords; no invented company names)",
+              "- tailoredResume: object { headline, summary, skills[], experienceBullets[] } (this is the FINAL copy to put on the resume)",
+              "- beforeAfter: object { summary: { before, after } } (before is from RESUME, after is your optimized version)",
               "- changeLogApplied: 2-6 bullets (what you changed in the GENERATED PDF addendum text vs a generic SWE resume)",
               "- nextEditsRecommended: 4-10 bullets (what to update in the resume content next)",
               "Rules:",
