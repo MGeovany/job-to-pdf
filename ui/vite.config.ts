@@ -45,10 +45,17 @@ export default defineConfig({
               "- mustHaves: 5-10 bullets",
               "- niceToHaves: 3-8 bullets",
               "- keywords: 10-20 single tokens/phrases",
+              "- resumeHeadline: string (single line, ATS-friendly)",
+              "- resumeSummary: string (3-5 lines, keyword-dense, recruiter tone)",
+              "- suggestedBullets: 6-10 bullets (resume-ready, quantified where possible)",
+              "- changeLogApplied: 2-6 bullets (what was changed in the generated PDF output)",
+              "- nextEditsRecommended: 4-10 bullets (what to edit in the resume next)",
               "Rules:",
               "- Output JSON only.",
               "- No markdown.",
               "- Keep bullets concise.",
+              "- Do NOT include the full job description in any field.",
+              "- Act as a senior HR recruiter optimizing for ATS and relevance.",
               "JOB:",
               jobText,
             ].join("\n")
@@ -66,7 +73,7 @@ export default defineConfig({
                   max_tokens: 900,
                   temperature: 0.2,
                   system:
-                    "You rewrite job descriptions into a compact, PDF-ready brief. Return ONLY valid JSON.",
+                    "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Return ONLY valid JSON.",
                   messages: [{ role: "user", content: prompt }],
                 }),
               })
@@ -109,7 +116,7 @@ export default defineConfig({
                   {
                     role: "system",
                     content:
-                      "You rewrite job descriptions into a compact, PDF-ready brief. Return ONLY valid JSON.",
+                      "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Return ONLY valid JSON.",
                   },
                   { role: "user", content: prompt },
                 ],

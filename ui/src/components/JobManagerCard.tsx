@@ -150,6 +150,16 @@ export function JobManagerCard(props: Props) {
                   </a>
                 ) : null}
 
+                {current.status === "done" && current.reportUrl ? (
+                  <a
+                    href={current.reportUrl}
+                    download={`tailoring-report-${sanitizeFilename(current.title) || "job"}.pdf`}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-black px-3 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-700 focus-visible:outline-offset-2"
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Report
+                  </a>
+                ) : null}
+
                 <button
                   type="button"
                   onClick={props.queueActive}

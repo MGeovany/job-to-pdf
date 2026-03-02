@@ -4,6 +4,12 @@ export type AiRefactor = {
   mustHaves: string[]
   niceToHaves: string[]
   keywords: string[]
+
+  resumeHeadline: string
+  resumeSummary: string
+  suggestedBullets: string[]
+  changeLogApplied: string[]
+  nextEditsRecommended: string[]
 }
 
 export type AiProvider = "openai" | "anthropic"
@@ -39,6 +45,17 @@ export async function refactorJobWithAi(
       : [],
     keywords: Array.isArray((parsed as any).keywords)
       ? (parsed as any).keywords.map(String)
+      : [],
+    resumeHeadline: String((parsed as any).resumeHeadline ?? ""),
+    resumeSummary: String((parsed as any).resumeSummary ?? ""),
+    suggestedBullets: Array.isArray((parsed as any).suggestedBullets)
+      ? (parsed as any).suggestedBullets.map(String)
+      : [],
+    changeLogApplied: Array.isArray((parsed as any).changeLogApplied)
+      ? (parsed as any).changeLogApplied.map(String)
+      : [],
+    nextEditsRecommended: Array.isArray((parsed as any).nextEditsRecommended)
+      ? (parsed as any).nextEditsRecommended.map(String)
       : [],
   }
 }

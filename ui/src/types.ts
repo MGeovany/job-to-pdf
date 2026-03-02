@@ -8,5 +8,6 @@ export type JobPost = {
   status: JobStatus
   aiMode: AiMode
   resultUrl?: string
+  reportUrl?: string
   error?: string
 }

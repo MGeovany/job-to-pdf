@@ -115,3 +115,101 @@ export async function buildPdfWithAiBrief(resumePdf: File, ai: AiRefactor) {
   const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
   return new Blob([ab], { type: "application/pdf" })
 }
+
+export async function buildTailoringReportPdf(ai: AiRefactor) {
+  const outDoc = await PDFDocument.create()
+  const font = await outDoc.embedFont(StandardFonts.Helvetica)
+  const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const a4 = { width: 595.28, height: 841.89 }
+  const margin = 56
+  const h1 = 18
+  const h2 = 12
+  const body = 11
+  const lh = 15
+  const maxWidth = a4.width - margin * 2
+  const measure = (s: string, size: number) => font.widthOfTextAtSize(s, size)
+  const wrap = (t: string, size: number) => wrapText(t, maxWidth, (s) => measure(s, size))
+
+  let page = outDoc.addPage([a4.width, a4.height])
+  let y = a4.height - margin
+
+  const ensureSpace = () => {
+    if (y >= margin + lh) return
+    page = outDoc.addPage([a4.width, a4.height])
+    y = a4.height - margin
+  }
+
+  const drawLine = (text: string, size = body, bold = false) => {
+    ensureSpace()
+    page.drawText(text, { x: margin, y, size, font: bold ? fontBold : font })
+    y -= lh
+  }
+
+  const drawBlock = (title: string, lines: string[]) => {
+    if (!lines.length) return
+    drawLine(title, h2, true)
+    for (const l of lines) {
+      for (const w of wrap(l, body)) drawLine(w || " ")
+    }
+    y -= 10
+  }
+
+  page.drawText("Tailoring Report", { x: margin, y: y - h1, size: h1, font: fontBold })
+  y -= h1 + 18
+
+  if (ai.title.trim()) {
+    drawLine(`Target role: ${ai.title.trim()}`, body, true)
+    y -= 6
+  }
+
+  drawBlock("ATS keyword pack", [
+    ai.keywords
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .slice(0, 24)
+      .join("  "),
+  ].filter(Boolean) as string[])
+
+  if (ai.resumeHeadline.trim()) {
+    drawBlock("Suggested resume headline", [ai.resumeHeadline.trim()])
+  }
+
+  if (ai.resumeSummary.trim()) {
+    drawBlock(
+      "Suggested summary (paste into resume)",
+      wrap(ai.resumeSummary.trim(), body).map((l) => l || " ")
+    )
+  }
+
+  drawBlock(
+    "Suggested bullets (adapt to your experience)",
+    ai.suggestedBullets
+      .map((b) => b.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+      .map((b) => `- ${b}`)
+  )
+
+  drawBlock(
+    "Changes applied to generated PDF",
+    ai.changeLogApplied
+      .map((b) => b.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+      .map((b) => `- ${b}`)
+  )
+
+  drawBlock(
+    "Next edits recommended (to improve fit)",
+    ai.nextEditsRecommended
+      .map((b) => b.trim())
+      .filter(Boolean)
+      .slice(0, 12)
+      .map((b) => `- ${b}`)
+  )
+
+  const bytes = await outDoc.save()
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return new Blob([ab], { type: "application/pdf" })
+}

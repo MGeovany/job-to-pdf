@@ -5,7 +5,7 @@ import { AiTokenCard } from "@/components/AiTokenCard"
 import { ResumeUploadCard } from "@/components/ResumeUploadCard"
 import { JobManagerCard } from "@/components/JobManagerCard"
 import { refactorJobWithAi, type AiProvider } from "@/lib/ai"
-import { buildPdfPassthrough, buildPdfWithAiBrief } from "@/lib/pdf-builders"
+import { buildPdfPassthrough, buildPdfWithAiBrief, buildTailoringReportPdf } from "@/lib/pdf-builders"
 import { deleteStoredResume, readStoredResume, writeStoredResume } from "@/lib/resume-store"
 
 function createJobPost(id: string, index: number): JobPost {
@@ -81,19 +81,23 @@ export default function App() {
     ;(async () => {
       try {
         let blob: Blob
+        let reportBlob: Blob | null = null
         if (nextPost.aiMode === "on" && aiToken.trim()) {
           const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content)
           blob = await buildPdfWithAiBrief(file, brief)
+          reportBlob = await buildTailoringReportPdf(brief)
         } else {
           blob = await buildPdfPassthrough(file)
         }
 
         const url = URL.createObjectURL(blob)
+        const reportUrl = reportBlob ? URL.createObjectURL(reportBlob) : undefined
         setPosts((all) =>
           all.map((p) => {
             if (p.id !== nextId) return p
             if (p.resultUrl) URL.revokeObjectURL(p.resultUrl)
-            return { ...p, status: "done", resultUrl: url, error: undefined }
+            if (p.reportUrl) URL.revokeObjectURL(p.reportUrl)
+            return { ...p, status: "done", resultUrl: url, reportUrl, error: undefined }
           })
         )
         toast.success("PDF ready")
