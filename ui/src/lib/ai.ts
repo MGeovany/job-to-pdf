@@ -23,6 +23,11 @@ export type AiRefactor = {
     }
   }
 
+  docxPatches: Array<{
+    before: string
+    after: string
+  }>
+
   changeLogApplied: string[]
   nextEditsRecommended: string[]
 }
@@ -83,6 +88,11 @@ export async function refactorJobWithAi(
         after: String((parsed as any).beforeAfter?.summary?.after ?? ""),
       },
     },
+    docxPatches: Array.isArray((parsed as any).docxPatches)
+      ? (parsed as any).docxPatches
+          .filter((p: any) => p && typeof p.before === "string" && typeof p.after === "string")
+          .map((p: any) => ({ before: String(p.before), after: String(p.after) }))
+      : [],
     changeLogApplied: Array.isArray((parsed as any).changeLogApplied)
       ? (parsed as any).changeLogApplied.map(String)
       : [],

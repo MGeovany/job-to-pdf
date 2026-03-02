@@ -3,9 +3,160 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import type { ViteDevServer } from "vite"
 import type { IncomingMessage, ServerResponse } from "node:http"
+import JSZip from "jszip"
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom"
+import os from "node:os"
+import fs from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+import crypto from "node:crypto"
+
+const execFileAsync = promisify(execFile)
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function buildRuns(doc: any, text: string, boldKeywords: string[]) {
+  const runs: any[] = []
+  const kws = boldKeywords
+    .map((k) => String(k || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 12)
+
+  if (kws.length === 0) {
+    const r = doc.createElement("w:r")
+    const t = doc.createElement("w:t")
+    t.setAttribute("xml:space", "preserve")
+    t.appendChild(doc.createTextNode(text))
+    r.appendChild(t)
+    return [r]
+  }
+
+  const re = new RegExp(kws.map(escapeRegExp).join("|"), "gi")
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const start = m.index
+    const end = start + m[0].length
+    if (start > last) {
+      const plain = text.slice(last, start)
+      const r = doc.createElement("w:r")
+      const t = doc.createElement("w:t")
+      t.setAttribute("xml:space", "preserve")
+      t.appendChild(doc.createTextNode(plain))
+      r.appendChild(t)
+      runs.push(r)
+    }
+
+    const hit = text.slice(start, end)
+    const rB = doc.createElement("w:r")
+    const rPr = doc.createElement("w:rPr")
+    const b = doc.createElement("w:b")
+    rPr.appendChild(b)
+    rB.appendChild(rPr)
+    const tB = doc.createElement("w:t")
+    tB.setAttribute("xml:space", "preserve")
+    tB.appendChild(doc.createTextNode(hit))
+    rB.appendChild(tB)
+    runs.push(rB)
+
+    last = end
+  }
+
+  if (last < text.length) {
+    const plain = text.slice(last)
+    const r = doc.createElement("w:r")
+    const t = doc.createElement("w:t")
+    t.setAttribute("xml:space", "preserve")
+    t.appendChild(doc.createTextNode(plain))
+    r.appendChild(t)
+    runs.push(r)
+  }
+
+  return runs
+}
+
+async function applyDocxPatches(docxBytes: Buffer, patches: Array<{ before: string; after: string }>, boldKeywords: string[]) {
+  const zip = await JSZip.loadAsync(docxBytes)
+  const file = zip.file("word/document.xml")
+  if (!file) throw new Error("DOCX missing document.xml")
+  const xml = await file.async("string")
+
+  const doc = new DOMParser().parseFromString(xml, "text/xml")
+  const paragraphs = Array.from(doc.getElementsByTagName("w:p")) as any[]
+
+  const remaining = patches
+    .map((p) => ({ before: String(p.before ?? ""), after: String(p.after ?? "") }))
+    .filter((p) => p.before.trim() && p.after.trim())
+
+  const applied: Set<number> = new Set()
+
+  for (const p of paragraphs) {
+    if (applied.size === remaining.length) break
+
+    const texts = Array.from(p.getElementsByTagName("w:t")) as any[]
+    const paragraphText = texts.map((t) => t.textContent ?? "").join("")
+    if (!paragraphText.trim()) continue
+
+    const normParagraph = paragraphText.replace(/\s+/g, " ").trim()
+
+    for (let i = 0; i < remaining.length; i++) {
+      if (applied.has(i)) continue
+      const { before, after } = remaining[i]
+      const idx = paragraphText.indexOf(before)
+
+      let nextText: string | null = null
+      if (idx !== -1) {
+        nextText = paragraphText.replace(before, after)
+      } else {
+        const normBefore = before.replace(/\s+/g, " ").trim()
+        if (normBefore && normParagraph.includes(normBefore)) {
+          nextText = normParagraph.replace(normBefore, after)
+        }
+      }
+
+      if (!nextText) continue
+
+      // keep <w:pPr> if present, replace all other children with new runs
+      const children = Array.from(p.childNodes) as any[]
+      for (const c of children) {
+        if (c.nodeType === 1 && c.tagName === "w:pPr") continue
+        p.removeChild(c)
+      }
+
+      const runs = buildRuns(doc, nextText, boldKeywords)
+      for (const r of runs) p.appendChild(r)
+
+      applied.add(i)
+      break
+    }
+  }
+
+  const outXml = new XMLSerializer().serializeToString(doc)
+  zip.file("word/document.xml", outXml)
+  return await zip.generateAsync({ type: "nodebuffer" })
+}
+
+async function findSofficeBinary() {
+  const candidates = [
+    "soffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+  ]
+  for (const bin of candidates) {
+    try {
+      await execFileAsync(bin, ["--version"], { timeout: 3000 })
+      return bin
+    } catch {
+      // try next
+    }
+  }
+  return null
 }
 
 export default defineConfig({
@@ -14,6 +165,83 @@ export default defineConfig({
     {
       name: "local-ai-proxy",
       configureServer(server: ViteDevServer) {
+        server.middlewares.use("/api/docx/tailor-to-pdf", async (req: IncomingMessage, res: ServerResponse) => {
+          if (req.method !== "POST") {
+            res.statusCode = 405
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Method not allowed" }))
+            return
+          }
+
+          try {
+            const chunks: Buffer[] = []
+            await new Promise<void>((resolve, reject) => {
+              req.on("data", (c: any) => chunks.push(Buffer.from(c)))
+              req.on("end", () => resolve())
+              req.on("error", reject)
+            })
+            const raw = Buffer.concat(chunks).toString("utf8")
+            const body = JSON.parse(raw || "{}") as any
+
+            const b64 = String(body.docxBase64 ?? "")
+            const patches = Array.isArray(body.patches) ? body.patches : []
+            const boldKeywords = Array.isArray(body.boldKeywords) ? body.boldKeywords : []
+
+            if (!b64) {
+              res.statusCode = 400
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ error: "Missing docx" }))
+              return
+            }
+
+            const soffice = await findSofficeBinary()
+            if (!soffice) {
+              res.statusCode = 500
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ error: "LibreOffice not found (install LibreOffice)" }))
+              return
+            }
+
+            const docxBytes = Buffer.from(b64, "base64")
+            const patched = await applyDocxPatches(docxBytes, patches, boldKeywords)
+
+            const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "job-to-pdf-"))
+            const id = crypto.randomBytes(8).toString("hex")
+            const docxPath = path.join(tmpDir, `${id}.docx`)
+            await fs.writeFile(docxPath, patched)
+
+            await execFileAsync(
+              soffice,
+              [
+                "--headless",
+                "--nologo",
+                "--nolockcheck",
+                "--nodefault",
+                "--norestore",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                tmpDir,
+                docxPath,
+              ],
+              { timeout: 90000 }
+            )
+
+            const pdfPath = path.join(tmpDir, `${id}.pdf`)
+            const pdf = await fs.readFile(pdfPath)
+
+            res.statusCode = 200
+            res.setHeader("Content-Type", "application/pdf")
+            res.end(pdf)
+
+            fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+          } catch (err: any) {
+            res.statusCode = 500
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: err?.message ?? "Server error" }))
+          }
+        })
+
         server.middlewares.use("/api/ai/refactor", async (req: IncomingMessage, res: ServerResponse) => {
           if (req.method !== "POST") {
             res.statusCode = 405
@@ -69,6 +297,8 @@ export default defineConfig({
               "- Do NOT invent employers, dates, or credentials. Only use what is present in RESUME input.",
               "- If RESUME is missing detail, write neutrally (no fabrication).",
               "- Ensure tailoredResume.skills has at least 8 items and tailoredResume.experienceBullets has at least 6 items.",
+              "- Also return docxPatches: array of { before, after } for replacing text in the DOCX. Include at least 1 patch for the RESUME summary paragraph.",
+              "  Use exact 'before' strings copied from RESUME text; 'after' is the optimized replacement.",
               "RESUME:",
               resumeText,
               "JOB:",
@@ -127,6 +357,19 @@ export default defineConfig({
                           },
                           required: ["summary"],
                         },
+                        docxPatches: {
+                          type: "array",
+                          minItems: 1,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            properties: {
+                              before: { type: "string" },
+                              after: { type: "string" },
+                            },
+                            required: ["before", "after"],
+                          },
+                        },
                         changeLogApplied: { type: "array", items: { type: "string" } },
                         nextEditsRecommended: { type: "array", items: { type: "string" } },
                       },
@@ -141,6 +384,7 @@ export default defineConfig({
                         "suggestedBullets",
                         "tailoredResume",
                         "beforeAfter",
+                        "docxPatches",
                         "changeLogApplied",
                         "nextEditsRecommended",
                       ],

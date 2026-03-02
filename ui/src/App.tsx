@@ -8,7 +8,6 @@ import { JobManagerCard } from "@/components/JobManagerCard"
 import { refactorJobWithAi, type AiProvider } from "@/lib/ai"
 import {
   buildPdfPassthrough,
-  buildTailoredCvPdf,
   buildTailoringReportPdf,
 } from "@/lib/pdf-builders"
 import { deleteStoredResume, readStoredResume, writeStoredResume } from "@/lib/resume-store"
@@ -27,7 +26,7 @@ function createJobPost(id: string, index: number): JobPost {
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [resumeText, setResumeText] = useState("")
-  const [parsedResume, setParsedResume] = useState<ParsedResume | null>(null)
+  const [, setParsedResume] = useState<ParsedResume | null>(null)
   const [aiProvider, setAiProvider] = useState<AiProvider>(
     () => (localStorage.getItem("aiProvider") as AiProvider) || "openai"
   )
@@ -98,8 +97,50 @@ export default function App() {
         let reportBlob: Blob | null = null
         if (nextPost.aiMode === "on" && aiToken.trim()) {
           if (!resumeText.trim()) throw new Error("Missing resume text (upload DOCX)")
+          const isDocx = file.name.toLowerCase().endsWith(".docx")
+          if (!isDocx) throw new Error("Upload DOCX to preserve layout")
+
           const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content, resumeText)
-          blob = await buildTailoredCvPdf(brief, parsedResume ?? undefined)
+          const patches =
+            brief.docxPatches?.length
+              ? brief.docxPatches
+              : brief.beforeAfter?.summary?.before && brief.beforeAfter?.summary?.after
+                ? [
+                    {
+                      before: brief.beforeAfter.summary.before,
+                      after: brief.beforeAfter.summary.after,
+                    },
+                  ]
+                : []
+          if (!patches.length) throw new Error("AI returned no patches")
+
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => {
+              const result = String(reader.result || "")
+              const comma = result.indexOf(",")
+              resolve(comma >= 0 ? result.slice(comma + 1) : result)
+            }
+            reader.onerror = () => reject(new Error("Failed to read DOCX"))
+            reader.readAsDataURL(file)
+          })
+
+          const pdfResp = await fetch("/api/docx/tailor-to-pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docxBase64: base64,
+              patches,
+              boldKeywords: (brief.keywords || []).slice(0, 12),
+            }),
+          })
+
+          if (!pdfResp.ok) {
+            const err = await pdfResp.json().catch(() => null)
+            throw new Error(String(err?.error ?? "Failed to render PDF"))
+          }
+
+          blob = await pdfResp.blob()
           reportBlob = await buildTailoringReportPdf(brief)
         } else {
           // Non-AI mode: only safe passthrough for PDF
