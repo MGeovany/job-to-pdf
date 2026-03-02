@@ -25,6 +25,58 @@ function pickResumeSummary(text: string) {
   return blocks.find((b) => b.length >= 80) || blocks[0] || ""
 }
 
+function normalizeText(s: string) {
+  return String(s || "")
+    .replace(/\s+/g, " ")
+    .replace(/\u00a0/g, " ")
+    .trim()
+}
+
+function looksLikeContactLine(s: string) {
+  const t = s.toLowerCase()
+  return t.includes("linkedin.com") || t.includes("github.com") || t.includes("@")
+}
+
+function looksLikePhone(s: string) {
+  const t = s.replace(/\s+/g, " ")
+  return /\+?\d[\d()\s.-]{7,}\d/.test(t)
+}
+
+function looksLikeHeading(s: string) {
+  const t = normalizeText(s)
+  if (!t) return false
+  if (t.length > 48) return false
+  return /^[A-Z0-9][A-Z0-9 &/._-]{2,}$/.test(t)
+}
+
+function looksLikeNameLine(s: string) {
+  const t = normalizeText(s)
+  if (!t) return false
+  if (t.length > 48) return false
+  if (looksLikeContactLine(t) || looksLikePhone(t)) return false
+  const words = t.split(" ")
+  if (words.length < 2 || words.length > 5) return false
+  const cap = words.filter((w) => /^[A-Z][a-z]+$/.test(w)).length
+  return cap >= 2
+}
+
+function tokenize(s: string) {
+  return normalizeText(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/g)
+    .filter((w) => w.length >= 3)
+}
+
+function overlapScore(a: string, b: string) {
+  const ta = new Set(tokenize(a))
+  const tb = new Set(tokenize(b))
+  if (ta.size === 0 || tb.size === 0) return 0
+  let hit = 0
+  for (const w of ta) if (tb.has(w)) hit++
+  return hit / Math.max(ta.size, tb.size)
+}
+
 function ensureDocxPatches(obj: any, resumeText: string) {
   const summaryBefore =
     typeof obj?.beforeAfter?.summary?.before === "string" ? obj.beforeAfter.summary.before : ""
@@ -64,11 +116,15 @@ function ensureParagraphPatches(obj: any, docxParagraphs: string[], resumeText: 
   const cleaned = existing
     .filter((p: any) => p && Number.isFinite(p.paragraphIndex) && typeof p.after === "string")
     .map((p: any) => ({ paragraphIndex: Number(p.paragraphIndex), after: String(p.after) }))
-
-  if (cleaned.length > 0) {
-    obj.paragraphPatches = cleaned
-    return obj
-  }
+    .filter((p: any) => p.after.trim())
+    .filter((p: any) => {
+      const t = docxParagraphs[p.paragraphIndex] || ""
+      // Don't let the model overwrite name/contact/headings
+      if (looksLikeNameLine(t)) return false
+      if (looksLikeContactLine(t) || looksLikePhone(t)) return false
+      if (looksLikeHeading(t)) return false
+      return true
+    })
 
   const before =
     typeof obj?.beforeAfter?.summary?.before === "string" && obj.beforeAfter.summary.before.trim()
@@ -83,21 +139,55 @@ function ensureParagraphPatches(obj: any, docxParagraphs: string[], resumeText: 
           ? obj.resumeSummary
           : ""
 
-  const normBefore = String(before || "").replace(/\s+/g, " ").trim()
-  let idx = -1
-  if (normBefore) {
-    idx = docxParagraphs.findIndex((t) => t.includes(normBefore) || normBefore.includes(t))
-  }
-  if (idx === -1) {
-    idx = docxParagraphs.findIndex((t) => t.length >= 80)
-  }
-  if (idx < 0) idx = 0
+  const normBefore = normalizeText(before)
 
-  if (typeof after === "string" && after.trim()) {
-    obj.paragraphPatches = [{ paragraphIndex: idx, after: String(after) }]
-  } else {
-    obj.paragraphPatches = []
+  let bestIdx = -1
+  let bestScore = 0
+  if (normBefore) {
+    for (let i = 0; i < docxParagraphs.length; i++) {
+      const t = docxParagraphs[i]
+      if (!t) continue
+      if (looksLikeNameLine(t)) continue
+      if (looksLikeContactLine(t) || looksLikePhone(t)) continue
+      if (looksLikeHeading(t)) continue
+
+      if (t.includes(normBefore) || normBefore.includes(t)) {
+        bestIdx = i
+        bestScore = 1
+        break
+      }
+
+      const s = overlapScore(normBefore, t)
+      if (s > bestScore) {
+        bestScore = s
+        bestIdx = i
+      }
+    }
   }
+
+  if (bestIdx === -1) {
+    bestIdx = docxParagraphs.findIndex((t) => t.length >= 80 && !looksLikeHeading(t))
+  }
+  if (bestIdx < 0) bestIdx = 0
+
+  const next: Array<{ paragraphIndex: number; after: string }> = [...cleaned]
+
+  const afterStr = typeof after === "string" ? after.trim() : ""
+  if (afterStr) {
+    const already = next.some((p) => p.paragraphIndex === bestIdx)
+    if (!already) {
+      next.unshift({ paragraphIndex: bestIdx, after: String(after) })
+    }
+  }
+
+  // De-dupe by paragraphIndex (first wins)
+  const seen = new Set<number>()
+  obj.paragraphPatches = next.filter((p) => {
+    if (seen.has(p.paragraphIndex)) return false
+    seen.add(p.paragraphIndex)
+    return true
+  })
+
   return obj
 }
 
@@ -407,6 +497,7 @@ export default defineConfig({
               "  - Choose paragraph indices from DOCX_PARAGRAPHS.",
               "  - Replace full paragraph text (do not append).",
               "  - Include at least 1 patch for the main summary paragraph.",
+              "  - Do NOT patch the name line, contact line, or headings (e.g., TECHNICAL SKILLS).",
               "RESUME:",
               resumeText,
               "DOCX_PARAGRAPHS:",
