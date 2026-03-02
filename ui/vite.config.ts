@@ -5,13 +5,7 @@ import type { ViteDevServer } from "vite"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import JSZip from "jszip"
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom"
-import os from "node:os"
-import fs from "node:fs/promises"
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
-import crypto from "node:crypto"
-
-const execFileAsync = promisify(execFile)
+// LibreOffice export removed; return patched DOCX only
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
@@ -190,21 +184,7 @@ async function applyDocxPatches(docxBytes: Buffer, patches: Array<{ before: stri
   }
 }
 
-async function findSofficeBinary() {
-  const candidates = [
-    "soffice",
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-  ]
-  for (const bin of candidates) {
-    try {
-      await execFileAsync(bin, ["--version"], { timeout: 3000 })
-      return bin
-    } catch {
-      // try next
-    }
-  }
-  return null
-}
+// (intentionally no PDF conversion here)
 
 export default defineConfig({
   plugins: [
@@ -212,7 +192,7 @@ export default defineConfig({
     {
       name: "local-ai-proxy",
       configureServer(server: ViteDevServer) {
-        server.middlewares.use("/api/docx/tailor-to-pdf", async (req: IncomingMessage, res: ServerResponse) => {
+        server.middlewares.use("/api/docx/tailor", async (req: IncomingMessage, res: ServerResponse) => {
           if (req.method !== "POST") {
             res.statusCode = 405
             res.setHeader("Content-Type", "application/json")
@@ -241,20 +221,9 @@ export default defineConfig({
               return
             }
 
-            const soffice = await findSofficeBinary()
-            if (!soffice) {
-              res.statusCode = 500
-              res.setHeader("Content-Type", "application/json")
-              res.end(JSON.stringify({ error: "LibreOffice not found (install LibreOffice)" }))
-              return
-            }
-
             const docxBytes = Buffer.from(b64, "base64")
             const patched = await applyDocxPatches(docxBytes, patches, boldKeywords)
 
-            const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "job-to-pdf-"))
-            const id = crypto.randomBytes(8).toString("hex")
-            const docxPath = path.join(tmpDir, `${id}.docx`)
             if (patched.appliedCount === 0) {
               res.statusCode = 400
               res.setHeader("Content-Type", "application/json")
@@ -262,34 +231,13 @@ export default defineConfig({
               return
             }
 
-            await fs.writeFile(docxPath, patched.bytes)
-
-            await execFileAsync(
-              soffice,
-              [
-                "--headless",
-                "--nologo",
-                "--nolockcheck",
-                "--nodefault",
-                "--norestore",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                tmpDir,
-                docxPath,
-              ],
-              { timeout: 90000 }
-            )
-
-            const pdfPath = path.join(tmpDir, `${id}.pdf`)
-            const pdf = await fs.readFile(pdfPath)
-
             res.statusCode = 200
-            res.setHeader("Content-Type", "application/pdf")
+            res.setHeader(
+              "Content-Type",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
             res.setHeader("X-Applied-Patches", String(patched.appliedCount))
-            res.end(pdf)
-
-            fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+            res.end(patched.bytes)
           } catch (err: any) {
             res.statusCode = 500
             res.setHeader("Content-Type", "application/json")

@@ -125,7 +125,7 @@ export default function App() {
             reader.readAsDataURL(file)
           })
 
-          const pdfResp = await fetch("/api/docx/tailor-to-pdf", {
+          const pdfResp = await fetch("/api/docx/tailor", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -137,7 +137,7 @@ export default function App() {
 
           if (!pdfResp.ok) {
             const err = await pdfResp.json().catch(() => null)
-            throw new Error(String(err?.error ?? "Failed to render PDF"))
+            throw new Error(String(err?.error ?? "Failed to render DOCX"))
           }
 
           blob = await pdfResp.blob()

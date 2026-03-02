@@ -144,7 +144,7 @@ export function JobManagerCard(props: Props) {
                 {current.status === "done" && current.resultUrl ? (
                   <a
                     href={current.resultUrl}
-                    download={`job-to-pdf-${sanitizeFilename(current.title) || "job"}.pdf`}
+                    download={`tailored-cv-${sanitizeFilename(current.title) || "job"}.docx`}
                     className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-black px-3 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-700 focus-visible:outline-offset-2"
                   >
                     <Download className="mr-2 h-4 w-4" /> Download
@@ -169,7 +169,7 @@ export function JobManagerCard(props: Props) {
                     "inline-flex h-9 items-center justify-center rounded-md bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-neutral-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-700 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:bg-neutral-900 disabled:text-neutral-500"
                   }
                 >
-                  {running && props.runningId !== current.id ? "Add to queue" : "Generate PDF"}
+                  {running && props.runningId !== current.id ? "Add to queue" : "Generate"}
                 </button>
               </div>
             </div>
