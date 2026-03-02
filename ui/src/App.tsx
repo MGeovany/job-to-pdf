@@ -12,6 +12,7 @@ import {
   buildTailoringReportPdf,
 } from "@/lib/pdf-builders"
 import { deleteStoredResume, readStoredResume, writeStoredResume } from "@/lib/resume-store"
+import { parseResume, type ParsedResume } from "@/lib/resume-parse"
 
 function createJobPost(id: string, index: number): JobPost {
   return {
@@ -26,6 +27,7 @@ function createJobPost(id: string, index: number): JobPost {
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [resumeText, setResumeText] = useState("")
+  const [parsedResume, setParsedResume] = useState<ParsedResume | null>(null)
   const [aiProvider, setAiProvider] = useState<AiProvider>(
     () => (localStorage.getItem("aiProvider") as AiProvider) || "openai"
   )
@@ -63,7 +65,9 @@ export default function App() {
         setFile(restored)
         if (restored.name.toLowerCase().endsWith(".docx")) {
           const { value } = await mammoth.extractRawText({ arrayBuffer: await restored.arrayBuffer() })
-          setResumeText(value || "")
+          const t = value || ""
+          setResumeText(t)
+          setParsedResume(parseResume(t))
         }
         toast.message("Resume restored")
       } catch {
@@ -95,7 +99,7 @@ export default function App() {
         if (nextPost.aiMode === "on" && aiToken.trim()) {
           if (!resumeText.trim()) throw new Error("Missing resume text (upload DOCX)")
           const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content, resumeText)
-          blob = await buildTailoredCvPdf(brief)
+          blob = await buildTailoredCvPdf(brief, parsedResume ?? undefined)
           reportBlob = await buildTailoringReportPdf(brief)
         } else {
           // Non-AI mode: only safe passthrough for PDF
@@ -140,15 +144,19 @@ export default function App() {
         .arrayBuffer()
         .then((ab) => mammoth.extractRawText({ arrayBuffer: ab }))
         .then(({ value }) => {
-          setResumeText(value || "")
+          const t = value || ""
+          setResumeText(t)
+          setParsedResume(parseResume(t))
           toast.message("DOCX parsed")
         })
         .catch(() => {
           setResumeText("")
+          setParsedResume(null)
           toast.error("Failed to read DOCX")
         })
     } else {
       setResumeText("")
+      setParsedResume(null)
     }
 
     writeStoredResume(picked)
@@ -159,6 +167,7 @@ export default function App() {
   const onForgetResume = () => {
     setFile(null)
     setResumeText("")
+    setParsedResume(null)
     deleteStoredResume().catch(() => {})
     toast.message("Resume forgotten")
   }

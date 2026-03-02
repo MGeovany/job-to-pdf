@@ -68,6 +68,7 @@ export default defineConfig({
               "- Avoid vague claims; prefer specific responsibilities and outcomes phrased generally (e.g., 'improved latency', 'reduced errors').",
               "- Do NOT invent employers, dates, or credentials. Only use what is present in RESUME input.",
               "- If RESUME is missing detail, write neutrally (no fabrication).",
+              "- Ensure tailoredResume.skills has at least 8 items and tailoredResume.experienceBullets has at least 6 items.",
               "RESUME:",
               resumeText,
               "JOB:",
@@ -105,8 +106,8 @@ export default defineConfig({
                           properties: {
                             headline: { type: "string" },
                             summary: { type: "string" },
-                            skills: { type: "array", items: { type: "string" } },
-                            experienceBullets: { type: "array", items: { type: "string" } },
+                            skills: { type: "array", minItems: 8, items: { type: "string" } },
+                            experienceBullets: { type: "array", minItems: 6, items: { type: "string" } },
                           },
                           required: ["headline", "summary", "skills", "experienceBullets"],
                         },

@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import type { AiRefactor } from "@/lib/ai"
+import type { ParsedResume } from "@/lib/resume-parse"
 
 function wrapText(text: string, maxWidth: number, measure: (s: string) => number) {
   const normalized = text.replace(/\r\n/g, "\n")
@@ -38,7 +39,7 @@ export async function buildPdfPassthrough(resumePdf: File) {
   return new Blob([bytes], { type: "application/pdf" })
 }
 
-export async function buildTailoredCvPdf(ai: AiRefactor) {
+export async function buildTailoredCvPdf(ai: AiRefactor, parsed?: ParsedResume) {
   const outDoc = await PDFDocument.create()
   const font = await outDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold)
@@ -75,16 +76,43 @@ export async function buildTailoredCvPdf(ai: AiRefactor) {
   }
 
   const tr = ai.tailoredResume
+
+  const name = (parsed?.name || "").trim()
+  const contact = (parsed?.contactLine || "").trim()
+
   const headline = (tr?.headline || ai.resumeHeadline || "").trim()
   const summary = (tr?.summary || ai.resumeSummary || "").trim()
-  const skills = (tr?.skills || []).map((s) => s.trim()).filter(Boolean)
+
+  const skills = (tr?.skills || [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .concat(parsed?.skills ?? [])
+    .flatMap((s) => (typeof s === "string" ? [s] : []))
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 24)
+
   const bullets = (tr?.experienceBullets || ai.suggestedBullets || [])
     .map((b) => b.trim())
     .filter(Boolean)
+    .concat(parsed?.bullets ?? [])
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+
+  if (name) {
+    page.drawText(name, { x: margin, y: y - h1, size: h1, font: fontBold })
+    y -= h1 + 10
+  }
+
+  if (contact) {
+    for (const l of wrap(contact, body)) drawLine(l || " ")
+    y -= 8
+  }
 
   if (headline) {
-    page.drawText(headline, { x: margin, y: y - h1, size: h1, font: fontBold })
-    y -= h1 + 18
+    drawLine(headline, h2, true)
+    y -= 8
   }
 
   if (summary) {
@@ -94,14 +122,14 @@ export async function buildTailoredCvPdf(ai: AiRefactor) {
 
   if (skills.length) {
     drawSection("Skills")
-    const line = skills.slice(0, 24).join("  ")
+    const line = skills.join("  ")
     for (const l of wrap(line, body)) drawLine(l || " ")
     y -= 10
   }
 
   if (bullets.length) {
     drawSection("Experience Highlights")
-    for (const b of bullets.slice(0, 10)) {
+    for (const b of bullets) {
       for (const l of wrap(`- ${b}`, body)) drawLine(l || " ")
     }
   }
