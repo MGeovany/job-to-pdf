@@ -59,6 +59,48 @@ function ensureDocxPatches(obj: any, resumeText: string) {
   return obj
 }
 
+function ensureParagraphPatches(obj: any, docxParagraphs: string[], resumeText: string) {
+  const existing = Array.isArray(obj.paragraphPatches) ? obj.paragraphPatches : []
+  const cleaned = existing
+    .filter((p: any) => p && Number.isFinite(p.paragraphIndex) && typeof p.after === "string")
+    .map((p: any) => ({ paragraphIndex: Number(p.paragraphIndex), after: String(p.after) }))
+
+  if (cleaned.length > 0) {
+    obj.paragraphPatches = cleaned
+    return obj
+  }
+
+  const before =
+    typeof obj?.beforeAfter?.summary?.before === "string" && obj.beforeAfter.summary.before.trim()
+      ? obj.beforeAfter.summary.before
+      : pickResumeSummary(resumeText)
+  const after =
+    typeof obj?.beforeAfter?.summary?.after === "string" && obj.beforeAfter.summary.after.trim()
+      ? obj.beforeAfter.summary.after
+      : typeof obj?.tailoredResume?.summary === "string"
+        ? obj.tailoredResume.summary
+        : typeof obj?.resumeSummary === "string"
+          ? obj.resumeSummary
+          : ""
+
+  const normBefore = String(before || "").replace(/\s+/g, " ").trim()
+  let idx = -1
+  if (normBefore) {
+    idx = docxParagraphs.findIndex((t) => t.includes(normBefore) || normBefore.includes(t))
+  }
+  if (idx === -1) {
+    idx = docxParagraphs.findIndex((t) => t.length >= 80)
+  }
+  if (idx < 0) idx = 0
+
+  if (typeof after === "string" && after.trim()) {
+    obj.paragraphPatches = [{ paragraphIndex: idx, after: String(after) }]
+  } else {
+    obj.paragraphPatches = []
+  }
+  return obj
+}
+
 function buildRuns(doc: any, text: string, boldKeywords: string[]) {
   const runs: any[] = []
   const kws = boldKeywords
@@ -228,6 +270,7 @@ export default defineConfig({
 
             const b64 = String(body.docxBase64 ?? "")
             const patches = Array.isArray(body.patches) ? body.patches : []
+            const paragraphPatches = Array.isArray(body.paragraphPatches) ? body.paragraphPatches : []
             const boldKeywords = Array.isArray(body.boldKeywords) ? body.boldKeywords : []
 
             if (!b64) {
@@ -238,7 +281,45 @@ export default defineConfig({
             }
 
             const docxBytes = Buffer.from(b64, "base64")
-            const patched = await applyDocxPatches(docxBytes, patches, boldKeywords)
+
+            let patched: { bytes: Buffer; appliedCount: number }
+            if (paragraphPatches.length) {
+              const zip = await JSZip.loadAsync(docxBytes)
+              const file = zip.file("word/document.xml")
+              if (!file) throw new Error("DOCX missing document.xml")
+              const xml = await file.async("string")
+              const doc = new DOMParser().parseFromString(xml, "text/xml")
+              const paragraphs = Array.from(doc.getElementsByTagName("w:p")) as any[]
+              let applied = 0
+
+              for (const pp of paragraphPatches) {
+                const i = Number(pp?.paragraphIndex)
+                const after = String(pp?.after ?? "")
+                if (!Number.isFinite(i) || i < 0) continue
+                if (!after.trim()) continue
+                const p = paragraphs[i]
+                if (!p) continue
+
+                const children = Array.from(p.childNodes) as any[]
+                for (const c of children) {
+                  if (c.nodeType === 1 && c.tagName === "w:pPr") continue
+                  p.removeChild(c)
+                }
+
+                const runs = buildRuns(doc, after, boldKeywords)
+                for (const r of runs) p.appendChild(r)
+                applied++
+              }
+
+              const outXml = new XMLSerializer().serializeToString(doc)
+              zip.file("word/document.xml", outXml)
+              patched = {
+                bytes: await zip.generateAsync({ type: "nodebuffer" }),
+                appliedCount: applied,
+              }
+            } else {
+              patched = await applyDocxPatches(docxBytes, patches, boldKeywords)
+            }
 
             if (patched.appliedCount === 0) {
               res.statusCode = 400
@@ -282,6 +363,9 @@ export default defineConfig({
             const token = String(body.token ?? "").trim()
             const jobText = String(body.jobText ?? "")
             const resumeText = String(body.resumeText ?? "")
+            const docxBase64 = String(body.docxBase64 ?? "")
+            const docxBytes = docxBase64 ? Buffer.from(docxBase64, "base64") : null
+            const docxParagraphs = docxBytes ? await extractDocxParagraphs(docxBytes) : []
 
             if (!token) {
               res.statusCode = 400
@@ -318,8 +402,15 @@ export default defineConfig({
               "- Ensure tailoredResume.skills has at least 8 items and tailoredResume.experienceBullets has at least 6 items.",
               "- Also return docxPatches: array of { before, after } for replacing text in the DOCX. Include at least 1 patch for the RESUME summary paragraph.",
               "  Use exact 'before' strings copied from RESUME text; 'after' is the optimized replacement.",
+              "- Also return paragraphPatches: array of { paragraphIndex, after } to replace full paragraphs in the DOCX by index.",
+              "  RULES for paragraphPatches:",
+              "  - Choose paragraph indices from DOCX_PARAGRAPHS.",
+              "  - Replace full paragraph text (do not append).",
+              "  - Include at least 1 patch for the main summary paragraph.",
               "RESUME:",
               resumeText,
+              "DOCX_PARAGRAPHS:",
+              JSON.stringify(docxParagraphs.slice(0, 80).map((t, i) => ({ i, t }))),
               "JOB:",
               jobText,
             ].join("\n")
@@ -389,6 +480,19 @@ export default defineConfig({
                             required: ["before", "after"],
                           },
                         },
+                        paragraphPatches: {
+                          type: "array",
+                          minItems: 1,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            properties: {
+                              paragraphIndex: { type: "integer", minimum: 0 },
+                              after: { type: "string" },
+                            },
+                            required: ["paragraphIndex", "after"],
+                          },
+                        },
                         changeLogApplied: { type: "array", items: { type: "string" } },
                         nextEditsRecommended: { type: "array", items: { type: "string" } },
                       },
@@ -404,6 +508,7 @@ export default defineConfig({
                         "tailoredResume",
                         "beforeAfter",
                         "docxPatches",
+                        "paragraphPatches",
                         "changeLogApplied",
                         "nextEditsRecommended",
                       ],
@@ -461,7 +566,12 @@ export default defineConfig({
                 return
               }
 
-              const text = JSON.stringify(ensureDocxPatches(input, resumeText))
+              const prepared = ensureParagraphPatches(
+                ensureDocxPatches(input, resumeText),
+                docxParagraphs,
+                resumeText
+              )
+              const text = JSON.stringify(prepared)
 
               res.statusCode = 200
               res.setHeader("Content-Type", "application/json")
@@ -507,7 +617,11 @@ export default defineConfig({
               const data = JSON.parse(text)
               const content = data?.choices?.[0]?.message?.content
               if (typeof content === "string") {
-                const obj = ensureDocxPatches(JSON.parse(content), resumeText)
+                const obj = ensureParagraphPatches(
+                  ensureDocxPatches(JSON.parse(content), resumeText),
+                  docxParagraphs,
+                  resumeText
+                )
                 data.choices[0].message.content = JSON.stringify(obj)
               }
               res.statusCode = 200
