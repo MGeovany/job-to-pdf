@@ -28,6 +28,11 @@ export type AiRefactor = {
     after: string
   }>
 
+  paragraphPatches: Array<{
+    paragraphIndex: number
+    after: string
+  }>
+
   changeLogApplied: string[]
   nextEditsRecommended: string[]
 }
@@ -38,12 +43,13 @@ export async function refactorJobWithAi(
   provider: AiProvider,
   token: string,
   jobText: string,
-  resumeText: string
+  resumeText: string,
+  docxBase64?: string
 ): Promise<AiRefactor> {
   const resp = await fetch("/api/ai/refactor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, token, jobText, resumeText }),
+    body: JSON.stringify({ provider, token, jobText, resumeText, docxBase64 }),
   })
 
   const data = (await resp.json().catch(() => null)) as any
@@ -92,6 +98,19 @@ export async function refactorJobWithAi(
       ? (parsed as any).docxPatches
           .filter((p: any) => p && typeof p.before === "string" && typeof p.after === "string")
           .map((p: any) => ({ before: String(p.before), after: String(p.after) }))
+      : [],
+    paragraphPatches: Array.isArray((parsed as any).paragraphPatches)
+      ? (parsed as any).paragraphPatches
+          .filter(
+            (p: any) =>
+              p &&
+              Number.isFinite(p.paragraphIndex) &&
+              typeof p.after === "string"
+          )
+          .map((p: any) => ({
+            paragraphIndex: Number(p.paragraphIndex),
+            after: String(p.after),
+          }))
       : [],
     changeLogApplied: Array.isArray((parsed as any).changeLogApplied)
       ? (parsed as any).changeLogApplied.map(String)

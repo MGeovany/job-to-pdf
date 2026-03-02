@@ -184,6 +184,22 @@ async function applyDocxPatches(docxBytes: Buffer, patches: Array<{ before: stri
   }
 }
 
+async function extractDocxParagraphs(docxBytes: Buffer) {
+  const zip = await JSZip.loadAsync(docxBytes)
+  const file = zip.file("word/document.xml")
+  if (!file) return []
+  const xml = await file.async("string")
+  const doc = new DOMParser().parseFromString(xml, "text/xml")
+  const paragraphs = Array.from(doc.getElementsByTagName("w:p")) as any[]
+  return paragraphs
+    .map((p) => {
+      const texts = Array.from(p.getElementsByTagName("w:t")) as any[]
+      return texts.map((t) => t.textContent ?? "").join("")
+    })
+    .map((t) => String(t || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+}
+
 // (intentionally no PDF conversion here)
 
 export default defineConfig({

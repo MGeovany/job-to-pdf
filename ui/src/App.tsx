@@ -100,20 +100,6 @@ export default function App() {
           const isDocx = file.name.toLowerCase().endsWith(".docx")
           if (!isDocx) throw new Error("Upload DOCX to preserve layout")
 
-          const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content, resumeText)
-          const patches =
-            brief.docxPatches?.length
-              ? brief.docxPatches
-              : brief.beforeAfter?.summary?.before && brief.beforeAfter?.summary?.after
-                ? [
-                    {
-                      before: brief.beforeAfter.summary.before,
-                      after: brief.beforeAfter.summary.after,
-                    },
-                  ]
-                : []
-          if (!patches.length) throw new Error("AI returned no patches")
-
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
             reader.onload = () => {
@@ -125,22 +111,50 @@ export default function App() {
             reader.readAsDataURL(file)
           })
 
-          const pdfResp = await fetch("/api/docx/tailor", {
+          const brief = await refactorJobWithAi(
+            aiProvider,
+            aiToken,
+            nextPost.content,
+            resumeText,
+            base64
+          )
+
+          const paragraphPatches = brief.paragraphPatches || []
+
+          // Back-compat fallback for older responses
+          const docxPatches =
+            brief.docxPatches?.length
+              ? brief.docxPatches
+              : brief.beforeAfter?.summary?.before && brief.beforeAfter?.summary?.after
+                ? [
+                    {
+                      before: brief.beforeAfter.summary.before,
+                      after: brief.beforeAfter.summary.after,
+                    },
+                  ]
+                : []
+
+          if (!paragraphPatches.length && !docxPatches.length) {
+            throw new Error("AI returned no patches")
+          }
+
+          const docxResp = await fetch("/api/docx/tailor", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               docxBase64: base64,
-              patches,
+              paragraphPatches,
+              patches: docxPatches,
               boldKeywords: (brief.keywords || []).slice(0, 12),
             }),
           })
 
-          if (!pdfResp.ok) {
-            const err = await pdfResp.json().catch(() => null)
+          if (!docxResp.ok) {
+            const err = await docxResp.json().catch(() => null)
             throw new Error(String(err?.error ?? "Failed to render DOCX"))
           }
 
-          blob = await pdfResp.blob()
+          blob = await docxResp.blob()
           reportBlob = await buildTailoringReportPdf(brief)
         } else {
           // Non-AI mode: only safe passthrough for PDF
