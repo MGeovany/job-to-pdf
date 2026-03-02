@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react"
 import { Toaster, toast } from "sonner"
+import mammoth from "mammoth"
 import type { JobPost } from "@/types"
 import { AiTokenCard } from "@/components/AiTokenCard"
 import { ResumeUploadCard } from "@/components/ResumeUploadCard"
 import { JobManagerCard } from "@/components/JobManagerCard"
 import { refactorJobWithAi, type AiProvider } from "@/lib/ai"
-import { buildPdfPassthrough, buildPdfWithAiBrief, buildTailoringReportPdf } from "@/lib/pdf-builders"
+import {
+  buildPdfPassthrough,
+  buildTailoredCvPdf,
+  buildTailoringReportPdf,
+} from "@/lib/pdf-builders"
 import { deleteStoredResume, readStoredResume, writeStoredResume } from "@/lib/resume-store"
 
 function createJobPost(id: string, index: number): JobPost {
@@ -20,6 +25,7 @@ function createJobPost(id: string, index: number): JobPost {
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
+  const [resumeText, setResumeText] = useState("")
   const [aiProvider, setAiProvider] = useState<AiProvider>(
     () => (localStorage.getItem("aiProvider") as AiProvider) || "openai"
   )
@@ -55,6 +61,10 @@ export default function App() {
         const restored = await readStoredResume()
         if (!restored) return
         setFile(restored)
+        if (restored.name.toLowerCase().endsWith(".docx")) {
+          const { value } = await mammoth.extractRawText({ arrayBuffer: await restored.arrayBuffer() })
+          setResumeText(value || "")
+        }
         toast.message("Resume restored")
       } catch {
         // ignore
@@ -83,11 +93,17 @@ export default function App() {
         let blob: Blob
         let reportBlob: Blob | null = null
         if (nextPost.aiMode === "on" && aiToken.trim()) {
-          const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content)
-          blob = await buildPdfWithAiBrief(file, brief)
+          if (!resumeText.trim()) throw new Error("Missing resume text (upload DOCX)")
+          const brief = await refactorJobWithAi(aiProvider, aiToken, nextPost.content, resumeText)
+          blob = await buildTailoredCvPdf(brief)
           reportBlob = await buildTailoringReportPdf(brief)
         } else {
-          blob = await buildPdfPassthrough(file)
+          // Non-AI mode: only safe passthrough for PDF
+          if (file.name.toLowerCase().endsWith(".pdf")) {
+            blob = await buildPdfPassthrough(file)
+          } else {
+            throw new Error("Upload PDF for non-AI, or enable AI with DOCX")
+          }
         }
 
         const url = URL.createObjectURL(blob)
@@ -113,6 +129,28 @@ export default function App() {
 
   const onPickResume = (picked: File) => {
     setFile(picked)
+
+    const isDocx =
+      picked.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      picked.name.toLowerCase().endsWith(".docx")
+
+    if (isDocx) {
+      picked
+        .arrayBuffer()
+        .then((ab) => mammoth.extractRawText({ arrayBuffer: ab }))
+        .then(({ value }) => {
+          setResumeText(value || "")
+          toast.message("DOCX parsed")
+        })
+        .catch(() => {
+          setResumeText("")
+          toast.error("Failed to read DOCX")
+        })
+    } else {
+      setResumeText("")
+    }
+
     writeStoredResume(picked)
       .then(() => toast.message("Resume saved locally"))
       .catch(() => {})
@@ -120,6 +158,7 @@ export default function App() {
 
   const onForgetResume = () => {
     setFile(null)
+    setResumeText("")
     deleteStoredResume().catch(() => {})
     toast.message("Resume forgotten")
   }

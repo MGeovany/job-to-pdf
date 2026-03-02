@@ -8,6 +8,21 @@ export type AiRefactor = {
   resumeHeadline: string
   resumeSummary: string
   suggestedBullets: string[]
+
+  tailoredResume: {
+    headline: string
+    summary: string
+    skills: string[]
+    experienceBullets: string[]
+  }
+
+  beforeAfter: {
+    summary: {
+      before: string
+      after: string
+    }
+  }
+
   changeLogApplied: string[]
   nextEditsRecommended: string[]
 }
@@ -17,12 +32,13 @@ export type AiProvider = "openai" | "anthropic"
 export async function refactorJobWithAi(
   provider: AiProvider,
   token: string,
-  jobText: string
+  jobText: string,
+  resumeText: string
 ): Promise<AiRefactor> {
   const resp = await fetch("/api/ai/refactor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, token, jobText }),
+    body: JSON.stringify({ provider, token, jobText, resumeText }),
   })
 
   const data = (await resp.json().catch(() => null)) as any
@@ -51,6 +67,22 @@ export async function refactorJobWithAi(
     suggestedBullets: Array.isArray((parsed as any).suggestedBullets)
       ? (parsed as any).suggestedBullets.map(String)
       : [],
+    tailoredResume: {
+      headline: String((parsed as any).tailoredResume?.headline ?? ""),
+      summary: String((parsed as any).tailoredResume?.summary ?? ""),
+      skills: Array.isArray((parsed as any).tailoredResume?.skills)
+        ? (parsed as any).tailoredResume.skills.map(String)
+        : [],
+      experienceBullets: Array.isArray((parsed as any).tailoredResume?.experienceBullets)
+        ? (parsed as any).tailoredResume.experienceBullets.map(String)
+        : [],
+    },
+    beforeAfter: {
+      summary: {
+        before: String((parsed as any).beforeAfter?.summary?.before ?? ""),
+        after: String((parsed as any).beforeAfter?.summary?.after ?? ""),
+      },
+    },
     changeLogApplied: Array.isArray((parsed as any).changeLogApplied)
       ? (parsed as any).changeLogApplied.map(String)
       : [],

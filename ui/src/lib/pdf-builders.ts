@@ -38,9 +38,80 @@ export async function buildPdfPassthrough(resumePdf: File) {
   return new Blob([bytes], { type: "application/pdf" })
 }
 
-export async function buildPdfWithAiBrief(resumePdf: File, ai: AiRefactor) {
-  const resumeBytes = await resumePdf.arrayBuffer()
-  const resumeDoc = await PDFDocument.load(resumeBytes)
+export async function buildTailoredCvPdf(ai: AiRefactor) {
+  const outDoc = await PDFDocument.create()
+  const font = await outDoc.embedFont(StandardFonts.Helvetica)
+  const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const a4 = { width: 595.28, height: 841.89 }
+  const margin = 56
+  const h1 = 18
+  const h2 = 12
+  const body = 11
+  const lh = 15
+  const maxWidth = a4.width - margin * 2
+  const measure = (s: string, size: number) => font.widthOfTextAtSize(s, size)
+  const wrap = (t: string, size: number) => wrapText(t, maxWidth, (s) => measure(s, size))
+
+  let page = outDoc.addPage([a4.width, a4.height])
+  let y = a4.height - margin
+
+  const ensureSpace = () => {
+    if (y >= margin + lh) return
+    page = outDoc.addPage([a4.width, a4.height])
+    y = a4.height - margin
+  }
+
+  const drawLine = (text: string, size = body, bold = false) => {
+    ensureSpace()
+    page.drawText(text, { x: margin, y, size, font: bold ? fontBold : font })
+    y -= lh
+  }
+
+  const drawSection = (title: string) => {
+    y -= 4
+    drawLine(title, h2, true)
+    y -= 2
+  }
+
+  const tr = ai.tailoredResume
+  const headline = (tr?.headline || ai.resumeHeadline || "").trim()
+  const summary = (tr?.summary || ai.resumeSummary || "").trim()
+  const skills = (tr?.skills || []).map((s) => s.trim()).filter(Boolean)
+  const bullets = (tr?.experienceBullets || ai.suggestedBullets || [])
+    .map((b) => b.trim())
+    .filter(Boolean)
+
+  if (headline) {
+    page.drawText(headline, { x: margin, y: y - h1, size: h1, font: fontBold })
+    y -= h1 + 18
+  }
+
+  if (summary) {
+    for (const line of wrap(summary, body)) drawLine(line || " ")
+    y -= 10
+  }
+
+  if (skills.length) {
+    drawSection("Skills")
+    const line = skills.slice(0, 24).join("  ")
+    for (const l of wrap(line, body)) drawLine(l || " ")
+    y -= 10
+  }
+
+  if (bullets.length) {
+    drawSection("Experience Highlights")
+    for (const b of bullets.slice(0, 10)) {
+      for (const l of wrap(`- ${b}`, body)) drawLine(l || " ")
+    }
+  }
+
+  const bytes = await outDoc.save()
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return new Blob([ab], { type: "application/pdf" })
+}
+
+export async function buildPdfWithAiBrief(_resumePdf: File, ai: AiRefactor) {
   const outDoc = await PDFDocument.create()
 
   const font = await outDoc.embedFont(StandardFonts.Helvetica)
@@ -104,9 +175,6 @@ export async function buildPdfWithAiBrief(resumePdf: File, ai: AiRefactor) {
       .join("  ")
     for (const line of wrap(kw, body)) drawLine(line || " ")
   }
-
-  const copied = await outDoc.copyPages(resumeDoc, resumeDoc.getPageIndices())
-  for (const p of copied) outDoc.addPage(p)
 
   const bytes = await outDoc.save()
   const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer

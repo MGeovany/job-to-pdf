@@ -34,6 +34,7 @@ export default defineConfig({
             const provider = String(body.provider ?? "openai")
             const token = String(body.token ?? "").trim()
             const jobText = String(body.jobText ?? "")
+            const resumeText = String(body.resumeText ?? "")
 
             if (!token) {
               res.statusCode = 400
@@ -63,69 +64,122 @@ export default defineConfig({
               "- Act as a senior HR recruiter optimizing for ATS and relevance.",
               "- Reuse exact keywords/phrases from the job description (where truthful/neutral) across resumeHeadline/resumeSummary/suggestedBullets.",
               "- Avoid vague claims; prefer specific responsibilities and outcomes phrased generally (e.g., 'improved latency', 'reduced errors').",
+              "- Do NOT invent employers, dates, or credentials. Only use what is present in RESUME input.",
+              "- If RESUME is missing detail, write neutrally (no fabrication).",
+              "RESUME:",
+              resumeText,
               "JOB:",
               jobText,
             ].join("\n")
 
             if (provider === "anthropic") {
-              const upstream = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-api-key": token,
-                  "anthropic-version": "2023-06-01",
-                },
-                body: JSON.stringify({
-                  // Cheap + broadly available model
-                  model: "claude-3-haiku-20240307",
-                  max_tokens: 900,
-                  temperature: 0.2,
-                  system:
-                    "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Use the tool to return structured output.",
-                  tools: [
-                    {
-                      name: "tailor_job",
-                      description:
-                        "Return a structured ATS-focused brief and resume tailoring notes based on the job description.",
-                      input_schema: {
-                        type: "object",
-                        additionalProperties: false,
-                        properties: {
-                          title: { type: "string" },
-                          summary: { type: "string" },
-                          mustHaves: { type: "array", items: { type: "string" } },
-                          niceToHaves: { type: "array", items: { type: "string" } },
-                          keywords: { type: "array", items: { type: "string" } },
-                          resumeHeadline: { type: "string" },
-                          resumeSummary: { type: "string" },
-                          suggestedBullets: { type: "array", items: { type: "string" } },
-                          changeLogApplied: { type: "array", items: { type: "string" } },
-                          nextEditsRecommended: { type: "array", items: { type: "string" } },
+              const anthropicRequest = {
+                // Cheap + broadly available model
+                model: "claude-3-haiku-20240307",
+                max_tokens: 900,
+                temperature: 0.2,
+                system:
+                  "You are a senior HR recruiter. You tailor resumes to job descriptions for ATS. Use the tool to return structured output.",
+                tools: [
+                  {
+                    name: "tailor_job",
+                    description:
+                      "Return a structured ATS-focused brief and resume tailoring notes based on the job description.",
+                    input_schema: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        title: { type: "string" },
+                        summary: { type: "string" },
+                        mustHaves: { type: "array", items: { type: "string" } },
+                        niceToHaves: { type: "array", items: { type: "string" } },
+                        keywords: { type: "array", items: { type: "string" } },
+                        resumeHeadline: { type: "string" },
+                        resumeSummary: { type: "string" },
+                        suggestedBullets: { type: "array", items: { type: "string" } },
+                        tailoredResume: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            headline: { type: "string" },
+                            summary: { type: "string" },
+                            skills: { type: "array", items: { type: "string" } },
+                            experienceBullets: { type: "array", items: { type: "string" } },
+                          },
+                          required: ["headline", "summary", "skills", "experienceBullets"],
                         },
-                        required: [
-                          "title",
-                          "summary",
-                          "mustHaves",
-                          "niceToHaves",
-                          "keywords",
-                          "resumeHeadline",
-                          "resumeSummary",
-                          "suggestedBullets",
-                          "changeLogApplied",
-                          "nextEditsRecommended",
-                        ],
+                        beforeAfter: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            summary: {
+                              type: "object",
+                              additionalProperties: false,
+                              properties: {
+                                before: { type: "string" },
+                                after: { type: "string" },
+                              },
+                              required: ["before", "after"],
+                            },
+                          },
+                          required: ["summary"],
+                        },
+                        changeLogApplied: { type: "array", items: { type: "string" } },
+                        nextEditsRecommended: { type: "array", items: { type: "string" } },
                       },
+                      required: [
+                        "title",
+                        "summary",
+                        "mustHaves",
+                        "niceToHaves",
+                        "keywords",
+                        "resumeHeadline",
+                        "resumeSummary",
+                        "suggestedBullets",
+                        "tailoredResume",
+                        "beforeAfter",
+                        "changeLogApplied",
+                        "nextEditsRecommended",
+                      ],
                     },
-                  ],
-                  tool_choice: { type: "tool", name: "tailor_job" },
-                  messages: [{ role: "user", content: prompt }],
-                }),
-              })
+                  },
+                ],
+                tool_choice: { type: "tool", name: "tailor_job" },
+                messages: [{ role: "user", content: prompt }],
+              }
 
-              const payload = (await upstream.json().catch(() => null)) as any
-              if (!upstream.ok) {
-                const msg = payload?.error?.message || payload?.message || `AI error (${upstream.status})`
-                res.statusCode = upstream.status
+              const retryDelays = [250, 750, 1500]
+              let upstream: Response | null = null
+              let payload: any = null
+
+              for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+                upstream = await fetch("https://api.anthropic.com/v1/messages", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": token,
+                    "anthropic-version": "2023-06-01",
+                  },
+                  body: JSON.stringify(anthropicRequest),
+                })
+
+                payload = (await upstream.json().catch(() => null)) as any
+
+                const overloaded =
+                  upstream.status === 529 ||
+                  upstream.status === 503 ||
+                  payload?.error?.type === "overloaded_error" ||
+                  String(payload?.error?.message ?? "").toLowerCase().includes("overloaded")
+
+                if (upstream.ok || !overloaded || attempt === retryDelays.length) break
+
+                await sleep(retryDelays[attempt])
+              }
+
+              if (!upstream || !upstream.ok) {
+                const status = upstream?.status ?? 500
+                const msg = payload?.error?.message || payload?.message || `AI error (${status})`
+                res.statusCode = status
                 res.setHeader("Content-Type", "application/json")
                 res.end(JSON.stringify({ error: String(msg) }))
                 return

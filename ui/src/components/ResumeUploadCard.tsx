@@ -23,14 +23,24 @@ export function ResumeUploadCard(props: Props) {
     setDragActive(false)
     const dropped = e.dataTransfer.files?.[0]
     if (!dropped) return
-    if (dropped.type !== "application/pdf") return
+    const ok =
+      dropped.type === "application/pdf" ||
+      dropped.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      dropped.name.toLowerCase().endsWith(".docx")
+    if (!ok) return
     props.onPick(dropped)
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.[0]
     if (!picked) return
-    if (picked.type !== "application/pdf") return
+    const ok =
+      picked.type === "application/pdf" ||
+      picked.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      picked.name.toLowerCase().endsWith(".docx")
+    if (!ok) return
     props.onPick(picked)
   }
 
@@ -65,7 +75,7 @@ export function ResumeUploadCard(props: Props) {
         >
           <input
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             onChange={handleChange}
           />
@@ -80,7 +90,7 @@ export function ResumeUploadCard(props: Props) {
           ) : (
             <div className="px-6 text-center">
               <div className="text-sm font-medium text-neutral-200">Drop PDF or click</div>
-              <div className="mt-1 text-xs text-neutral-500">PDF only</div>
+              <div className="mt-1 text-xs text-neutral-500">PDF or DOCX</div>
             </div>
           )}
         </div>
