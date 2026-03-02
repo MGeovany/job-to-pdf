@@ -21,6 +21,50 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
+function pickResumeSummary(text: string) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n")
+  const blocks = normalized
+    .split(/\n\s*\n/g)
+    .map((b) => b.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+  // pick the first reasonably long block
+  return blocks.find((b) => b.length >= 80) || blocks[0] || ""
+}
+
+function ensureDocxPatches(obj: any, resumeText: string) {
+  const summaryBefore =
+    typeof obj?.beforeAfter?.summary?.before === "string" ? obj.beforeAfter.summary.before : ""
+  const summaryAfter =
+    typeof obj?.beforeAfter?.summary?.after === "string" ? obj.beforeAfter.summary.after : ""
+
+  if (!obj.beforeAfter) obj.beforeAfter = { summary: { before: "", after: "" } }
+  if (!obj.beforeAfter.summary) obj.beforeAfter.summary = { before: "", after: "" }
+
+  const pickedBefore = summaryBefore.trim() ? summaryBefore : pickResumeSummary(resumeText)
+  const pickedAfter =
+    summaryAfter.trim()
+      ? summaryAfter
+      : typeof obj?.tailoredResume?.summary === "string"
+        ? obj.tailoredResume.summary
+        : typeof obj?.resumeSummary === "string"
+          ? obj.resumeSummary
+          : ""
+
+  if (!obj.beforeAfter.summary.before) obj.beforeAfter.summary.before = pickedBefore
+  if (!obj.beforeAfter.summary.after) obj.beforeAfter.summary.after = pickedAfter
+
+  const existing = Array.isArray(obj.docxPatches) ? obj.docxPatches : []
+  const cleaned = existing.filter((p: any) => p && typeof p.before === "string" && typeof p.after === "string")
+
+  if (cleaned.length === 0 && pickedBefore.trim() && pickedAfter.trim()) {
+    obj.docxPatches = [{ before: pickedBefore, after: pickedAfter }]
+  } else {
+    obj.docxPatches = cleaned
+  }
+
+  return obj
+}
+
 function buildRuns(doc: any, text: string, boldKeywords: string[]) {
   const runs: any[] = []
   const kws = boldKeywords
@@ -140,7 +184,10 @@ async function applyDocxPatches(docxBytes: Buffer, patches: Array<{ before: stri
 
   const outXml = new XMLSerializer().serializeToString(doc)
   zip.file("word/document.xml", outXml)
-  return await zip.generateAsync({ type: "nodebuffer" })
+  return {
+    bytes: await zip.generateAsync({ type: "nodebuffer" }),
+    appliedCount: applied.size,
+  }
 }
 
 async function findSofficeBinary() {
@@ -208,7 +255,14 @@ export default defineConfig({
             const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "job-to-pdf-"))
             const id = crypto.randomBytes(8).toString("hex")
             const docxPath = path.join(tmpDir, `${id}.docx`)
-            await fs.writeFile(docxPath, patched)
+            if (patched.appliedCount === 0) {
+              res.statusCode = 400
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ error: "No matching text found in DOCX for patches" }))
+              return
+            }
+
+            await fs.writeFile(docxPath, patched.bytes)
 
             await execFileAsync(
               soffice,
@@ -232,6 +286,7 @@ export default defineConfig({
 
             res.statusCode = 200
             res.setHeader("Content-Type", "application/pdf")
+            res.setHeader("X-Applied-Patches", String(patched.appliedCount))
             res.end(pdf)
 
             fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
@@ -442,7 +497,7 @@ export default defineConfig({
                 return
               }
 
-              const text = JSON.stringify(input)
+              const text = JSON.stringify(ensureDocxPatches(input, resumeText))
 
               res.statusCode = 200
               res.setHeader("Content-Type", "application/json")
@@ -481,6 +536,22 @@ export default defineConfig({
               res.setHeader("Content-Type", "application/json")
               res.end(JSON.stringify({ error: text || `AI error (${upstream.status})` }))
               return
+            }
+
+            // Ensure docxPatches exists (fallback from beforeAfter.summary or first resume block)
+            try {
+              const data = JSON.parse(text)
+              const content = data?.choices?.[0]?.message?.content
+              if (typeof content === "string") {
+                const obj = ensureDocxPatches(JSON.parse(content), resumeText)
+                data.choices[0].message.content = JSON.stringify(obj)
+              }
+              res.statusCode = 200
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify(data))
+              return
+            } catch {
+              // If anything fails, pass through
             }
 
             res.statusCode = 200
